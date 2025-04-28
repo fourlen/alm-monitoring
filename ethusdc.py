@@ -1,0 +1,209 @@
+import datetime
+from vault_events import get_all_vault_events
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from gql import gql, Client
+from gql.transport.requests import RequestsHTTPTransport
+
+# Настройка клиента GraphQL
+transport = RequestsHTTPTransport(
+    url="https://api.studio.thegraph.com/query/50593/clamm-alm/version/latest",
+    verify=True,
+    retries=3,
+)
+client = Client(transport=transport, fetch_schema_from_transport=True)
+
+# Функция для получения данных о волте
+
+
+def get_vault_data(vault_id):
+    query = gql("""
+    query ($id: ID!) {
+      almVault(id: $id) {
+        id
+        totalAmount0
+        totalAmount1
+        decimals0
+        decimals1
+        lastPrice
+        holdersCount
+        token0
+        token1
+      }
+    }
+    """)
+    params = {"id": vault_id}
+    result = client.execute(query, variable_values=params)
+    return result['almVault']
+
+# Функция для получения данных о ребалансировках
+
+
+def get_rebalance_data(vault_id):
+    query = gql("""
+    query ($vault: Bytes!) {
+      vaultRebalances(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: asc) {
+        createdAtTimestamp
+        totalAmount0
+        totalAmount1
+        feeAmount0
+        feeAmount1
+        lastPrice
+      }
+    }
+    """)
+    params = {"vault": vault_id}
+    result = client.execute(query, variable_values=params)
+    return result['vaultRebalances']
+
+# Функция для преобразования данных в DataFrame
+
+
+def process_rebalance_data(rebalances, decimals0, decimals1):
+    data = []
+    for r in rebalances:
+        timestamp = int(r['createdAtTimestamp'])
+        date = datetime.datetime.utcfromtimestamp(timestamp)
+        amount0 = int(r['totalAmount0']) / (10 ** decimals0)
+        amount1 = int(r['totalAmount1']) / (10 ** decimals1)
+        fee0 = int(r['feeAmount0']) / (10 ** decimals0)
+        fee1 = int(r['feeAmount1']) / (10 ** decimals1)
+        price = float(r['lastPrice'])
+        tvl = amount0 * price + amount1
+        fees = fee0 * price + fee1
+        ratio = amount1 / (amount0 * price + amount1) * \
+            100 if (amount0 * price + amount1) > 0 else 0
+        data.append({
+            "date": date,
+            "TVL": tvl,
+            "Fees": fees,
+            "Deposit Token Ratio (%)": ratio
+        })
+    return pd.DataFrame(data)
+
+
+def build_tvl_series(events, token0Decimals, token1Decimals):
+    tvl_by_time = []
+
+    for event in events:
+        timestamp = int(event['createdAtTimestamp'])
+        dt = datetime.datetime.fromtimestamp(timestamp)
+
+        tvl_usd = int(event['totalAmount0']) * float(event['lastPrice']) / (
+            10 ** token0Decimals) + int(event['totalAmount1']) / (10 ** token1Decimals)
+
+        tvl_by_time.append((dt, tvl_usd))
+
+    return tvl_by_time
+
+
+def plot_tvl(tvl_data):
+    if not tvl_data:
+        st.warning("Нет данных для отображения TVL.")
+        return
+
+    # Преобразуем данные в DataFrame
+    df = pd.DataFrame(tvl_data, columns=["timestamp", "TVL"])
+    df["date"] = pd.to_datetime(df["timestamp"], unit="s")
+
+    # Сортируем по дате
+    df = df.sort_values("date")
+
+    # Строим график
+    fig_tvl = px.line(df, x="date", y="TVL", title="TVL Over Time (USD)")
+    fig_tvl.update_layout(xaxis_title="Date",
+                          yaxis_title="TVL (USD)", height=500)
+
+    # Показываем в Streamlit
+    st.plotly_chart(fig_tvl, use_container_width=True)
+
+
+def process_update_data(updates, decimals0, decimals1):
+    data = []
+    for u in updates:
+        timestamp = int(u['createdAtTimestamp'])
+        date = datetime.datetime.utcfromtimestamp(timestamp)
+        amount0 = int(u['totalAmount0']) / (10 ** decimals0)
+        amount1 = int(u['totalAmount1']) / (10 ** decimals1)
+        # fee0 = int(u['feeAmount0']) / (10 ** decimals0)
+        # fee1 = int(u['feeAmount1']) / (10 ** decimals1)
+        price = float(u['lastPrice'])
+        tvl = amount0 * price + amount1
+        # fees = fee0 * price + fee1
+        ratio = amount1 / (amount0 * price + amount1) * \
+            100 if (amount0 * price + amount1) > 0 else 0
+        data.append({
+            "date": date,
+            "TVL": tvl,
+            # "Fees": fees,
+            "Deposit Token Ratio (%)": ratio
+        })
+    return pd.DataFrame(data)
+
+# Пример использования:
+
+
+def main():
+    vault_id = "0x1487d907247e6e1bcfb6c73b193c74a16266368c"  # ID волта
+    
+	    # Фильтрация по последнему месяцу
+    one_month_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+
+    all_events = get_all_vault_events(client, vault_id)
+    filtered_events = [e for e in all_events if int(
+        e['createdAtTimestamp']) >= one_month_ago.timestamp()]
+
+    st.title("ALM Vault Dashboard: WETH/USDC")
+
+    vault_data = get_vault_data(vault_id)
+    if not vault_data:
+        st.error("Vault data not found.")
+        return
+
+    if not filtered_events:
+        st.error("No recent updates found.")
+        return
+
+    decimals0 = int(vault_data['decimals0'])
+    decimals1 = int(vault_data['decimals1'])
+    df = process_update_data(filtered_events, decimals0, decimals1)
+
+    st.subheader("Current Vault Metrics")
+    current_tvl = df['TVL'].iloc[-1]
+    current_ratio = df['Deposit Token Ratio (%)'].iloc[-1]
+    deposit_token_inventory = int(
+        vault_data['totalAmount1']) / (10 ** decimals1)
+    paired_token_inventory = int(
+        vault_data['totalAmount0']) / (10 ** decimals0) * float(vault_data['lastPrice'])
+    holders = vault_data['holdersCount']
+
+    row1 = st.columns(3)
+    row2 = st.columns(2)
+
+    row1[0].metric("TVL (USD)", f"${current_tvl:,.2f}")
+    row1[1].metric("Deposit Token Ratio", f"{current_ratio:.2f}%")
+    row1[2].metric("Deposit Token Inventory",
+                   f"{deposit_token_inventory:,.2f}")
+    row2[0].metric("Paired Token Inventory", f"${paired_token_inventory:,.2f}")
+    row2[1].metric("Total Holders", holders)
+
+    st.subheader("TVL Over Time")
+    fig_tvl = px.line(df, x='date', y='TVL', title='TVL Over Time (USD)')
+    st.plotly_chart(fig_tvl, use_container_width=True)
+
+    # st.subheader("Total Fees Earned Per Day")
+    # fig_fees = px.line(df, x='date', y='Fees',
+    #                    title='Total Fees Earned Per Day (USD)')
+    # st.plotly_chart(fig_fees, use_container_width=True)
+
+    st.subheader("Historical Deposit Token Ratio")
+    fig_ratio = px.line(df, x='date', y='Deposit Token Ratio (%)',
+                        title='Deposit Token Ratio Over Time (%)')
+    st.plotly_chart(fig_ratio, use_container_width=True)
+
+    # plot_tvl(filtered_events)
+
+
+if __name__ == "__main__":
+    main()

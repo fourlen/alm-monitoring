@@ -126,17 +126,17 @@ def process_update_data(updates, decimals0, decimals1):
         date = datetime.datetime.utcfromtimestamp(timestamp)
         amount0 = int(u['totalAmount0']) / (10 ** decimals0)
         amount1 = int(u['totalAmount1']) / (10 ** decimals1)
-        # fee0 = int(u['feeAmount0']) / (10 ** decimals0)
-        # fee1 = int(u['feeAmount1']) / (10 ** decimals1)
+        fee0 = int(u['feeAmount0']) / (10 ** decimals0) if 'feeAmount0' in u else 0
+        fee1 = int(u['feeAmount1']) / (10 ** decimals1) if 'feeAmount0' in u else 0
         price = float(u['lastPrice'])
         tvl = amount0 * price + amount1
-        # fees = fee0 * price + fee1
+        fees = fee0 * price + fee1
         ratio = amount1 / (amount0 * price + amount1) * \
             100 if (amount0 * price + amount1) > 0 else 0
         data.append({
             "date": date,
             "TVL": tvl,
-            # "Fees": fees,
+            "Fees": fees,
             "Deposit Token Ratio (%)": ratio
         })
     return pd.DataFrame(data)
@@ -192,10 +192,10 @@ def main():
     fig_tvl = px.line(df, x='date', y='TVL', title='TVL Over Time (USD)')
     st.plotly_chart(fig_tvl, use_container_width=True)
 
-    # st.subheader("Total Fees Earned Per Day")
-    # fig_fees = px.line(df, x='date', y='Fees',
-    #                    title='Total Fees Earned Per Day (USD)')
-    # st.plotly_chart(fig_fees, use_container_width=True)
+    st.subheader("Total Fees Earned Per Day")
+    fig_fees = px.bar(df, x='date', y='Fees',
+                    title='Total Fees Earned Per Day (USD)')
+    st.plotly_chart(fig_fees, use_container_width=True)
 
     st.subheader("Historical Deposit Token Ratio")
     fig_ratio = px.line(df, x='date', y='Deposit Token Ratio (%)',

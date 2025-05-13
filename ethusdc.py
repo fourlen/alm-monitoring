@@ -1,5 +1,6 @@
 import datetime
 from vault_events import get_all_vault_events
+from pool_events import get_pool_swaps
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -13,6 +14,13 @@ transport = RequestsHTTPTransport(
     retries=3,
 )
 client = Client(transport=transport, fetch_schema_from_transport=True)
+
+transport_analytics = RequestsHTTPTransport(
+    url="https://gateway.thegraph.com/api/4d7b59e4fd14365ae609945af85f3938/subgraphs/id/5pwQHNUqE7GFeG7C32m2HM3vhXvoQpet4HAinmHFmxW5",
+    verify=True,
+    retries=3,
+)
+client_analytics = Client(transport=transport_analytics, fetch_schema_from_transport=True)
 
 # Функция для получения данных о волте
 
@@ -141,11 +149,27 @@ def process_update_data(updates, decimals0, decimals1):
         })
     return pd.DataFrame(data)
 
-# Пример использования:
+def process_swaps(swaps):
+    data = []
+    
+    if len(swaps) <= 2:
+        return data
 
+    for i in range(len(swaps)):
+        timestamp = int(swaps[i]['timestamp'])
+        date = datetime.datetime.utcfromtimestamp(timestamp)
+        price1 = int(swaps[i - 1]['price']) ** 2 / (2 ** 192)
+        price2 = int(swaps[i]['price']) ** 2 / (2 ** 192)
+        data.append({
+            "date": date,
+            "Price change (%)": (price2 - price1) / price1
+        })
+    
+    return data
 
 def main():
     vault_id = "0x1487d907247e6e1bcfb6c73b193c74a16266368c"  # ID волта
+    pool_id = "0xabff72aee1ba72fc459acd5222dd84a3182411bb"
     
 	    # Фильтрация по последнему месяцу
     one_month_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
@@ -154,6 +178,8 @@ def main():
     filtered_events = [e for e in all_events if int(
         e['createdAtTimestamp']) >= one_month_ago.timestamp()]
 
+    price_changes = process_swaps(sorted(get_pool_swaps(client_analytics, pool_id), key=lambda swap: swap['timestamp']))
+    
     st.title("ALM Vault Dashboard: WETH/USDC")
 
     vault_data = get_vault_data(vault_id)
@@ -201,6 +227,10 @@ def main():
     fig_ratio = px.line(df, x='date', y='Deposit Token Ratio (%)',
                         title='Deposit Token Ratio Over Time (%)')
     st.plotly_chart(fig_ratio, use_container_width=True)
+
+    st.subheader("Price change over time")
+    fig_tvl = px.line(price_changes, x='date', y='Price change (%)', title='Price change (%)')
+    st.plotly_chart(fig_tvl, use_container_width=True)
 
     # plot_tvl(filtered_events)
 

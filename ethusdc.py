@@ -1,6 +1,7 @@
 import datetime
 from vault_events import get_all_vault_events
 from pool_events import get_pool_swaps
+from chaindata import get_positions_amounts, get_pool_price
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -195,13 +196,22 @@ def main():
     decimals1 = int(vault_data['decimals1'])
     df = process_update_data(filtered_events, decimals0, decimals1)
 
+    # eth       usdc
+    reserve0, reserve1 = get_positions_amounts()
+    price = get_pool_price()
+
+    reserve0_in_token1 = reserve0 * price
+
+    reserve0_usd = reserve0_in_token1 / (10 ** 6)
+    reserve1_usd = reserve1 / (10 ** 6)
+
+    tvl = reserve0_usd + reserve1_usd
+
     st.subheader("Current Vault Metrics")
-    current_tvl = df['TVL'].iloc[-1]
-    current_ratio = df['Deposit Token Ratio (%)'].iloc[-1]
-    deposit_token_inventory = int(
-        vault_data['totalAmount1']) / (10 ** decimals1)
-    paired_token_inventory = int(
-        vault_data['totalAmount0']) / (10 ** decimals0) * float(vault_data['lastPrice'])
+    current_tvl = tvl
+    current_ratio = reserve1_usd / tvl * 100
+    deposit_token_inventory = reserve1_usd
+    paired_token_inventory = reserve0_usd
     holders = vault_data['holdersCount']
 
     row1 = st.columns(3)
@@ -210,7 +220,7 @@ def main():
     row1[0].metric("TVL (USD)", f"${current_tvl:,.2f}")
     row1[1].metric("Deposit Token Ratio", f"{current_ratio:.2f}%")
     row1[2].metric("Deposit Token Inventory",
-                   f"{deposit_token_inventory:,.2f}")
+                   f"${deposit_token_inventory:,.2f}")
     row2[0].metric("Paired Token Inventory", f"${paired_token_inventory:,.2f}")
     row2[1].metric("Total Holders", holders)
 
@@ -237,3 +247,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

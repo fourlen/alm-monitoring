@@ -3,3 +3,4 @@ pandas==2.2.3
 plotly==6.0.1
 streamlit==1.44.1
 requests-toolbelt==1.0.0
+web3==7.11.1

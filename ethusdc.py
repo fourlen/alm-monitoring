@@ -52,7 +52,7 @@ def get_vault_data(vault_id):
 def get_rebalance_data(vault_id):
     query = gql("""
     query ($vault: Bytes!) {
-      vaultRebalances(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: asc) {
+      vaultRebalances(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: desc) {
         createdAtTimestamp
         totalAmount0
         totalAmount1
@@ -175,7 +175,7 @@ def main():
 	    # Фильтрация по последнему месяцу
     one_month_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
 
-    all_events = get_all_vault_events(client, vault_id)
+    all_events, rebalances_only = get_all_vault_events(client, vault_id)
     filtered_events = [e for e in all_events if int(
         e['createdAtTimestamp']) >= one_month_ago.timestamp()]
 
@@ -223,6 +223,15 @@ def main():
                    f"${deposit_token_inventory:,.2f}")
     row2[0].metric("Paired Token Inventory", f"${paired_token_inventory:,.2f}")
     row2[1].metric("Total Holders", holders)
+
+    if rebalances_only:
+        last_rebalances = sorted(rebalances_only, key=lambda r: int(r['createdAtTimestamp']), reverse=True)[:5]
+        df_rebalances = process_rebalance_data(last_rebalances, decimals0, decimals1)
+
+        st.subheader("Last 5 Rebalances")
+        st.dataframe(df_rebalances, use_container_width=True)
+    else:
+        st.warning("No rebalances found.")
 
     st.subheader("TVL Over Time")
     fig_tvl = px.line(df, x='date', y='TVL', title='TVL Over Time (USD)')

@@ -3,7 +3,7 @@ from gql import gql
 def get_vault_rebalances(client, vault_id):
     query = gql("""
     query ($vault: Bytes!) {
-      vaultRebalances(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: asc) {
+      vaultRebalances(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: desc) {
         createdAtTimestamp
         type: __typename
         totalAmount0
@@ -19,14 +19,14 @@ def get_vault_rebalances(client, vault_id):
 def get_vault_deposits(client, vault_id):
     query = gql("""
     query ($vault: Bytes!) {
-      vaultDeposits(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: asc) {
+      vaultDeposits(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: desc) {
         createdAtTimestamp
         type: __typename
         sender
         totalAmount0
         totalAmount1
         shares
-		lastPrice
+		    lastPrice
       }
     }
     """)
@@ -35,7 +35,7 @@ def get_vault_deposits(client, vault_id):
 def get_vault_withdrawals(client, vault_id):
     query = gql("""
     query ($vault: Bytes!) {
-      vaultWithdraws(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: asc) {
+      vaultWithdraws(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: desc) {
         createdAtTimestamp
         type: __typename
         sender
@@ -51,7 +51,7 @@ def get_vault_withdrawals(client, vault_id):
 def get_vault_collect_fees(client, vault_id):
     query = gql("""
     query ($vault: Bytes!) {
-      vaultCollectFees(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: asc) {
+      vaultCollectFees(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: desc) {
         createdAtTimestamp
         type: __typename
         feeAmount0
@@ -73,4 +73,4 @@ def get_all_vault_events(client, vault_id):
     all_events = rebalances + deposits + withdrawals + collect_fees
     all_events.sort(key=lambda x: int(x['createdAtTimestamp']))
 
-    return all_events
+    return all_events, rebalances

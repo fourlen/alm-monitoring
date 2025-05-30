@@ -1,7 +1,7 @@
 import datetime
 from vault_events import get_all_vault_events
 from pool_events import get_pool_swaps
-from chaindata import get_positions_amounts, get_pool_price, get_pos_ticks
+from chaindata import get_positions_amounts, get_pool_price, get_pos_ticks, get_contracts
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -27,8 +27,6 @@ transport_analytics = RequestsHTTPTransport(
 client_analytics = Client(transport=transport_analytics, fetch_schema_from_transport=True)
 
 # Функция для получения данных о волте
-
-
 def get_vault_data(vault_id):
     query = gql("""
     query ($id: ID!) {
@@ -48,29 +46,6 @@ def get_vault_data(vault_id):
     params = {"id": vault_id}
     result = client.execute(query, variable_values=params)
     return result['almVault']
-
-# Функция для получения данных о ребалансировках
-
-
-def get_rebalance_data(vault_id):
-    query = gql("""
-    query ($vault: Bytes!) {
-      vaultRebalances(where: {vault: $vault}, orderBy: createdAtTimestamp, orderDirection: desc) {
-        createdAtTimestamp
-        totalAmount0
-        totalAmount1
-        feeAmount0
-        feeAmount1
-        lastPrice
-      }
-    }
-    """)
-    params = {"vault": vault_id}
-    result = client.execute(query, variable_values=params)
-    return result['vaultRebalances']
-
-# Функция для преобразования данных в DataFrame
-
 
 def process_rebalance_data(rebalances, decimals0, decimals1):
     data = []
@@ -223,8 +198,8 @@ def plot_positions(token0_pos, token1_pos, decimals0, decimals1):
         ax.text((transformed_ticks0[0] + transformed_ticks0[1]) / 2,
                 pos['liquidity'] / 2,
                 f"""
-                T0: {pos['amount0'] // 10**decimals0}
-                T1: {pos['amount1'] // 10**decimals1}
+                T0: {pos['amount0'] / 10**decimals0:.4f}
+                T1: {pos['amount1'] / 10**decimals1:.4f}
                 """,
                 color='blue', fontsize=12, ha='center', va='bottom', fontweight='bold')
 
@@ -245,8 +220,8 @@ def plot_positions(token0_pos, token1_pos, decimals0, decimals1):
         ax.text((transformed_ticks1[0] + transformed_ticks1[1]) / 2,
                 pos['liquidity'] / 2,
                 f"""
-                T0: {pos['amount0'] // 10**decimals0}
-                T1: {pos['amount1'] // 10**decimals1}
+                T0: {pos['amount0'] / 10**decimals0:.4f}
+                T1: {pos['amount1'] / 10**decimals1:.4f}
                 """,
                 color='orange', fontsize=12, ha='center', va='bottom', fontweight='bold')
 
@@ -269,8 +244,13 @@ def plot_positions(token0_pos, token1_pos, decimals0, decimals1):
     return fig
 
 def main():
-    vault_id = "0x1487d907247e6e1bcfb6c73b193c74a16266368c"  # ID волта
-    pool_id = "0xabff72aee1ba72fc459acd5222dd84a3182411bb"
+    # Извлекаем параметр 'vault' (если он есть)
+    vault_id = st.query_params.get('vault', '')
+    
+    vault, pool = get_contracts(vault_id)
+    
+    # vault_id = "0x1487d907247e6e1bcfb6c73b193c74a16266368c"  # ID волта
+    # pool_id = "0xabff72aee1ba72fc459acd5222dd84a3182411bb"
     
 	    # Фильтрация по последнему месяцу
     one_month_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
@@ -279,7 +259,7 @@ def main():
     filtered_events = [e for e in all_events if int(
         e['createdAtTimestamp']) >= one_month_ago.timestamp()]
 
-    price_changes = process_swaps(sorted(get_pool_swaps(client_analytics, pool_id), key=lambda swap: swap['timestamp']))
+    price_changes = process_swaps(sorted(get_pool_swaps(client_analytics, pool.address.lower()), key=lambda swap: swap['timestamp']))
     
     st.title("ALM Vault Dashboard: WETH/USDC")
 
@@ -297,12 +277,12 @@ def main():
     df = process_update_data(filtered_events, decimals0, decimals1)
 
     # eth       usdc
-    base_amount0, limit_amount0, base_amount1, limit_amount1, base_liquidity, limit_liquidity = get_positions_amounts()
+    base_amount0, limit_amount0, base_amount1, limit_amount1, base_liquidity, limit_liquidity = get_positions_amounts(vault)
     reserve0 = base_amount0 + limit_amount0
     reserve1 = base_amount1 + limit_amount1
-    price, tick = get_pool_price()
+    price, tick = get_pool_price(pool)
     
-    base_lower, base_upper, limit_lower, limit_upper = get_pos_ticks()
+    base_lower, base_upper, limit_lower, limit_upper = get_pos_ticks(vault)
 
     reserve0_in_token1 = reserve0 * price
 

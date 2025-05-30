@@ -28,9 +28,17 @@ pool = web3.eth.contract(address=POOL_ADDRESS, abi=pool_abi)
 def get_positions_amounts():
     base_liquidity, base_amount0, base_amount1 = vault.functions.getBasePosition().call()
     limit_liquidity, limit_amount0, limit_amount1 = vault.functions.getLimitPosition().call()
-    return base_amount0 + limit_amount0, base_amount1 + limit_amount1
+    return base_amount0, limit_amount0, base_amount1, limit_amount1, base_liquidity, limit_liquidity
 
 
 def get_pool_price():
 	price, tick, *_ = pool.functions.globalState().call()
-	return (price * price) / (2 ** 192)
+	return (price * price) / (2 ** 192), tick
+
+def get_pos_ticks():
+    base_lower = vault.functions.baseLower().call()
+    base_upper = vault.functions.baseUpper().call()
+    limit_lower = vault.functions.limitLower().call()
+    limit_upper = vault.functions.limitUpper().call()
+    
+    return base_lower, base_upper, limit_lower, limit_upper

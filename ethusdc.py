@@ -1,12 +1,15 @@
 import datetime
 from vault_events import get_all_vault_events
 from pool_events import get_pool_swaps
-from chaindata import get_positions_amounts, get_pool_price
+from chaindata import get_positions_amounts, get_pool_price, get_pos_ticks
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from gql import gql, Client
 from gql.transport.requests import RequestsHTTPTransport
+import numpy as np
+import matplotlib.pyplot as plt
+
 
 # Настройка клиента GraphQL
 transport = RequestsHTTPTransport(
@@ -168,6 +171,103 @@ def process_swaps(swaps):
     
     return data
 
+def transform_liquidity(x):
+    """ Apply a piecewise transformation to compress large negative values. """
+    return np.sign(x) * np.log10(abs(x) + 1) * 20000  # Logarithmic compression
+
+# Function to transform tick values
+def transform_ticks(token0range, token1range):
+    if token0range[0] == -887220:
+        return [token0range[1] - (token1range[1] - token1range[0]), token0range[1]], token1range
+    elif token0range[1] == 887220:
+        return [token0range[0], token0range[0] + (token1range[1] - token1range[0])], token1range
+    elif token1range[0] == -887220:
+        return token0range, [token1range[1] - (token0range[1] - token0range[0]), token1range[1]]
+    elif token1range[1] == 887220:
+        return token0range, [token1range[0], token1range[0] + (token0range[1] - token0range[0])]
+    else:
+        return token0range, token1range
+
+def plot_positions(token0_pos, token1_pos, decimals0, decimals1):
+    tick_values = set()
+    tick_positions = set()
+
+    fig, ax = plt.subplots()
+
+    transformed_ticks0, transformed_ticks1 = None, None
+    if token0_pos and token1_pos:
+        transformed_ticks0, transformed_ticks1 = transform_ticks(
+            [token0_pos["bottomTick"], token0_pos["topTick"]],
+            [token1_pos["bottomTick"], token1_pos["topTick"]]
+        )
+    elif token0_pos:
+        transformed_ticks0 = [token0_pos["bottomTick"], token0_pos["topTick"]]
+    elif token1_pos:
+        transformed_ticks1 = [token1_pos["bottomTick"], token1_pos["topTick"]]
+    else:
+        raise ValueError("Neither token0Pos nor token1Pos is available")
+
+
+    # Plot token0Pos if available
+    if transformed_ticks0:
+        pos = token0_pos
+        ax.plot([transformed_ticks0[0], transformed_ticks0[1]],
+                [pos['liquidity'], pos['liquidity']],
+                color='blue', linewidth=3, label="token0Pos")
+
+        ax.fill_between(np.array([float(transformed_ticks0[0]), float(transformed_ticks0[1])], dtype=np.float64),
+                np.array([float(pos['liquidity']), float(pos['liquidity'])], dtype=np.float64),
+                color='blue', alpha=0.1, label="_nolegend_")
+
+        # Add text inside the filled area
+        ax.text((transformed_ticks0[0] + transformed_ticks0[1]) / 2,
+                pos['liquidity'] / 2,
+                f"""
+                T0: {pos['amount0'] // 10**decimals0}
+                T1: {pos['amount1'] // 10**decimals1}
+                """,
+                color='blue', fontsize=12, ha='center', va='bottom', fontweight='bold')
+
+        tick_values.update([transformed_ticks0[0], transformed_ticks0[1]])
+        tick_positions.update([pos['bottomTick'], pos['topTick']])
+
+    # Plot token1Pos if available
+    if transformed_ticks1:
+        pos = token1_pos
+        ax.plot([transformed_ticks1[0], transformed_ticks1[1]],
+                [pos['liquidity'], pos['liquidity']],
+                color='orange', linewidth=3, label="token1Pos")
+
+        ax.fill_between(np.array([float(transformed_ticks1[0]), float(transformed_ticks1[1])], dtype=np.float64),
+                np.array([float(pos['liquidity']), float(pos['liquidity'])], dtype=np.float64),
+                color='orange', alpha=0.1, label="_nolegend_")
+
+        ax.text((transformed_ticks1[0] + transformed_ticks1[1]) / 2,
+                pos['liquidity'] / 2,
+                f"""
+                T0: {pos['amount0'] // 10**decimals0}
+                T1: {pos['amount1'] // 10**decimals1}
+                """,
+                color='orange', fontsize=12, ha='center', va='bottom', fontweight='bold')
+
+        tick_values.update([transformed_ticks1[0], transformed_ticks1[1]])
+        tick_positions.update([pos['bottomTick'], pos['topTick']])
+
+    # Sort tick positions
+    tick_positions = sorted(tick_positions)
+    tick_values = sorted(tick_values)
+
+    ax.set_xticks(list(tick_values))
+    ax.set_xticklabels(tick_positions)  # Keep original labels
+
+    # Labels and title
+    ax.set_xlabel("Tick (transformed scale)")
+    ax.set_ylabel("Liquidity")
+    ax.set_title(f"Liquidity Distribution")
+    ax.legend(["USDC", "ETH"])
+
+    return fig
+
 def main():
     vault_id = "0x1487d907247e6e1bcfb6c73b193c74a16266368c"  # ID волта
     pool_id = "0xabff72aee1ba72fc459acd5222dd84a3182411bb"
@@ -197,8 +297,12 @@ def main():
     df = process_update_data(filtered_events, decimals0, decimals1)
 
     # eth       usdc
-    reserve0, reserve1 = get_positions_amounts()
-    price = get_pool_price()
+    base_amount0, limit_amount0, base_amount1, limit_amount1, base_liquidity, limit_liquidity = get_positions_amounts()
+    reserve0 = base_amount0 + limit_amount0
+    reserve1 = base_amount1 + limit_amount1
+    price, tick = get_pool_price()
+    
+    base_lower, base_upper, limit_lower, limit_upper = get_pos_ticks()
 
     reserve0_in_token1 = reserve0 * price
 
@@ -232,6 +336,27 @@ def main():
         st.dataframe(df_rebalances, use_container_width=True)
     else:
         st.warning("No rebalances found.")
+    
+    st.subheader("Current ALM Position Ranges")
+    fig = plot_positions(
+        token0_pos={
+            'bottomTick': base_lower,
+            'topTick': base_upper,
+            'liquidity': base_liquidity,
+            'amount0': base_amount0,
+            'amount1': base_amount1
+        },
+        token1_pos={
+            'bottomTick': limit_lower,
+            'topTick': limit_upper,
+            'liquidity': limit_liquidity,
+            'amount0': limit_amount0,
+            'amount1': limit_amount1
+        },
+        decimals0=decimals0,
+        decimals1=decimals1
+    )
+    st.pyplot(fig)
 
     st.subheader("TVL Over Time")
     fig_tvl = px.line(df, x='date', y='TVL', title='TVL Over Time (USD)')
@@ -256,4 +381,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

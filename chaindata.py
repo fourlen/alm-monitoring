@@ -47,3 +47,16 @@ def get_pos_ticks(vault):
     limit_upper = vault.functions.limitUpper().call()
     
     return base_lower, base_upper, limit_lower, limit_upper
+
+def get_vault_tokens(vault):
+    token0 = vault.functions.token0().call()
+    token1 = vault.functions.token1().call()
+    allowToken0 = vault.functions.allowToken0().call()
+    
+    return token0, token1, allowToken0
+
+def get_token_name(token_address):
+    token_abi = load_abi("ERC20")
+    token = web3.eth.contract(address=Web3.to_checksum_address(token_address), abi=token_abi)
+    
+    return token.functions.symbol().call()

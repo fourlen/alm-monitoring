@@ -1,7 +1,7 @@
 import datetime
 from vault_events import get_all_vault_events
 from pool_events import get_pool_swaps
-from chaindata import get_positions_amounts, get_pool_price, get_pos_ticks, get_contracts
+from chaindata import get_positions_amounts, get_pool_price, get_pos_ticks, get_contracts, get_vault_tokens, get_token_name
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -47,7 +47,7 @@ def get_vault_data(vault_id):
     result = client.execute(query, variable_values=params)
     return result['almVault']
 
-def process_rebalance_data(rebalances, decimals0, decimals1):
+def process_rebalance_data(rebalances, decimals0, decimals1, allowToken0):
     data = []
     for r in rebalances:
         timestamp = int(r['createdAtTimestamp'])
@@ -59,7 +59,7 @@ def process_rebalance_data(rebalances, decimals0, decimals1):
         price = float(r['lastPrice'])
         tvl = amount0 * price + amount1
         fees = fee0 * price + fee1
-        ratio = amount1 / (amount0 * price + amount1) * \
+        ratio = (amount0 * price if allowToken0 else amount1) / (amount0 * price + amount1) * \
             100 if (amount0 * price + amount1) > 0 else 0
         data.append({
             "date": date,
@@ -106,7 +106,7 @@ def plot_tvl(tvl_data):
     st.plotly_chart(fig_tvl, use_container_width=True)
 
 
-def process_update_data(updates, decimals0, decimals1):
+def process_update_data(updates, decimals0, decimals1, allowToken0):
     data = []
     for u in updates:
         timestamp = int(u['createdAtTimestamp'])
@@ -118,7 +118,7 @@ def process_update_data(updates, decimals0, decimals1):
         price = float(u['lastPrice'])
         tvl = amount0 * price + amount1
         fees = fee0 * price + fee1
-        ratio = amount1 / (amount0 * price + amount1) * \
+        ratio = (amount0 * price if allowToken0 else amount1) / (amount0 * price + amount1) * \
             100 if (amount0 * price + amount1) > 0 else 0
         data.append({
             "date": date,
@@ -163,7 +163,7 @@ def transform_ticks(token0range, token1range):
     else:
         return token0range, token1range
 
-def plot_positions(token0_pos, token1_pos, decimals0, decimals1):
+def plot_positions(token0_pos, token1_pos, decimals0, decimals1, token0_name, token1_name):
     tick_values = set()
     tick_positions = set()
 
@@ -239,7 +239,7 @@ def plot_positions(token0_pos, token1_pos, decimals0, decimals1):
     ax.set_xlabel("Tick (transformed scale)")
     ax.set_ylabel("Liquidity")
     ax.set_title(f"Liquidity Distribution")
-    ax.legend(["USDC", "ETH"])
+    ax.legend([token0_name, token1_name])
 
     return fig
 
@@ -261,7 +261,15 @@ def main():
 
     price_changes = process_swaps(sorted(get_pool_swaps(client_analytics, pool.address.lower()), key=lambda swap: swap['timestamp']))
     
-    st.title("ALM Vault Dashboard: WETH/USDC")
+    token0, token1, allowToken0 = get_vault_tokens(vault)
+    token0_name = get_token_name(token0)
+    token1_name = get_token_name(token1)
+    
+    # print(allowToken0)
+    # print(token0_name)
+    # print(token1_name)
+    
+    st.title(f"ALM Vault Dashboard: {token0_name}/{token1_name}")
 
     vault_data = get_vault_data(vault_id)
     if not vault_data:
@@ -274,7 +282,7 @@ def main():
 
     decimals0 = int(vault_data['decimals0'])
     decimals1 = int(vault_data['decimals1'])
-    df = process_update_data(filtered_events, decimals0, decimals1)
+    df = process_update_data(filtered_events, decimals0, decimals1, allowToken0)
 
     # eth       usdc
     base_amount0, limit_amount0, base_amount1, limit_amount1, base_liquidity, limit_liquidity = get_positions_amounts(vault)
@@ -293,9 +301,9 @@ def main():
 
     st.subheader("Current Vault Metrics")
     current_tvl = tvl
-    current_ratio = reserve1_usd / tvl * 100
-    deposit_token_inventory = reserve1_usd
-    paired_token_inventory = reserve0_usd
+    current_ratio = reserve0_usd / tvl * 100 if allowToken0 else reserve1_usd / tvl * 100
+    deposit_token_inventory = reserve0_usd if allowToken0 else reserve1_usd
+    paired_token_inventory = reserve1_usd if allowToken0 else reserve0_usd
     holders = vault_data['holdersCount']
 
     row1 = st.columns(3)
@@ -310,7 +318,7 @@ def main():
 
     if rebalances_only:
         last_rebalances = sorted(rebalances_only, key=lambda r: int(r['createdAtTimestamp']), reverse=True)[:5]
-        df_rebalances = process_rebalance_data(last_rebalances, decimals0, decimals1)
+        df_rebalances = process_rebalance_data(last_rebalances, decimals0, decimals1, allowToken0)
 
         st.subheader("Last 5 Rebalances")
         st.dataframe(df_rebalances, use_container_width=True)
@@ -334,7 +342,9 @@ def main():
             'amount1': limit_amount1
         },
         decimals0=decimals0,
-        decimals1=decimals1
+        decimals1=decimals1,
+        token0_name=token0_name,
+        token1_name=token1_name,
     )
     st.pyplot(fig)
 

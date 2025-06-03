@@ -198,8 +198,8 @@ def plot_positions(token0_pos, token1_pos, decimals0, decimals1, token0_name, to
         ax.text((transformed_ticks0[0] + transformed_ticks0[1]) / 2,
                 pos['liquidity'] / 2,
                 f"""
-                T0: {pos['amount0'] / 10**decimals0:.4f}
-                T1: {pos['amount1'] / 10**decimals1:.4f}
+                {token0_name}: {pos['amount0'] / 10**decimals0:.4f}
+                {token1_name}: {pos['amount1'] / 10**decimals1:.4f}
                 """,
                 color='blue', fontsize=12, ha='center', va='bottom', fontweight='bold')
 
@@ -220,8 +220,8 @@ def plot_positions(token0_pos, token1_pos, decimals0, decimals1, token0_name, to
         ax.text((transformed_ticks1[0] + transformed_ticks1[1]) / 2,
                 pos['liquidity'] / 2,
                 f"""
-                T0: {pos['amount0'] / 10**decimals0:.4f}
-                T1: {pos['amount1'] / 10**decimals1:.4f}
+                {token0_name}: {pos['amount0'] / 10**decimals0:.4f}
+                {token1_name}: {pos['amount1'] / 10**decimals1:.4f}
                 """,
                 color='orange', fontsize=12, ha='center', va='bottom', fontweight='bold')
 
